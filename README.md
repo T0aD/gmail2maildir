@@ -2,6 +2,12 @@
 
 Python script to backup / convert a Gmail account into a Maildir from IMAP
 
+## Benefits
+
+* Detects renamed labels (thanks to unique UIDVALIDITY identifiers)
+* Doesn't waste place by using link() to point to original emails contained in [Gmail]/All Mail
+* Synchronizes the whole account (contrary to some tools that just fetch the last emails): delete locally remotely deleted emails
+
 ## Quick start
 
 You can either edit gmail2maildir.py to hardcode your username / password at the beginning or launch the script to get more instructions:
