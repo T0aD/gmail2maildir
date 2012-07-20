@@ -64,6 +64,9 @@ $ ./gmail2maildir.py clean
 
 ```
 
+Come to think about it, do it BEFORE moving your directory elsewhere.
+
+
 ## Crontab
 
 Stealth mode baby:
