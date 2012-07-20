@@ -11,6 +11,7 @@ import imaplib
 import re
 import os
 import sqlite3
+import sys
 
 ##
 # Configuration
@@ -18,9 +19,13 @@ import sqlite3
 # Short version:
 #username, password = 'your email', 'your password'
 
+# The base directory is the directory in which the script lies:
+root = os.path.dirname(sys.argv[0])
+
 if not 'username' in locals() or not 'password' in locals():
-    if os.path.exists('.account'):
-        fd = open('.account')
+    accountFile = os.path.join(root, '.account')
+    if os.path.exists(accountFile):
+        fd = open(accountFile)
         data = fd.readline()
         fd.close()
         username, password = data.rstrip('\n').split('::')
@@ -72,7 +77,8 @@ class Gmail:
             target = imaplib.IMAP4
         self.imap = target(self.hostname, self.port)
         self.imap.login(self.username, self.password)
-        print '[i] connected with %s on %s:%d' % (self.username, self.hostname, self.port)
+        if quiet is False:
+            print '[i] connected with %s on %s:%d' % (self.username, self.hostname, self.port)
 
     def logout(self):
         self.imap.logout()
@@ -142,9 +148,10 @@ class Gmail:
 
 class Database:
     def __init__(self, username=False):
-        if not os.path.exists(username):
-            os.mkdir(username)
-        db = os.path.join(username, 'gmail.sqlite')
+        path = os.path.join(root, username)
+        if not os.path.exists(path):
+            os.mkdir(path)
+        db = os.path.join(path, 'gmail.sqlite')
         self.connect(db)
 
     def connect(self, dbfile):
@@ -154,7 +161,7 @@ class Database:
         db = sqlite3.connect(dbfile)
 
         if exist is False:
-            print 'creating db', dbfile
+            print '[+] creating sqlite db', dbfile
             folders = "CREATE TABLE folders (name text, uid integer)"
             mails = "CREATE TABLE mails (uid integer, msgid integer, folder_uid integer)"
             db.execute(folders)
@@ -192,7 +199,12 @@ class Database:
         r = self.db.execute(q, (uid, name))
         self.db.commit()
     def delete_folder(self, uid):
+        self.clear_folder(uid)
         q = "DELETE FROM folders WHERE uid = ?"
+        r = self.db.execute(q, (uid, ))
+        self.db.commit()
+    def clear_folder(self, uid):
+        q = "DELETE FROM mails WHERE folder_uid = ?"
         r = self.db.execute(q, (uid, ))
         self.db.commit()
 
@@ -222,9 +234,10 @@ class Database:
 
 class Maildir:
     def __init__(self, username):
+        path = os.path.join(root, username)
         self.mbox = {}
         # We create the root of the mailboxes, the INBOX dir:
-        self.root = mailbox.Maildir(os.path.join(username, 'Maildir'))
+        self.root = mailbox.Maildir(os.path.join(path, 'Maildir'))
 
     # Manage folders (called mailboxes)
     def load_folder(self, uid, name):
@@ -239,13 +252,17 @@ class Maildir:
         else:
             name = name.replace('/', '.')
             self.mbox[uid] = self.root.add_folder(name)
+    def clr_folder(self, name):
+        if name == 'INBOX':
+            mbox = self.root
+        else:
+            name = name.replace('/', '.')
+            mbox = self.root.get_folder(name)
+        mbox.clear()
     def del_folder(self, name):
-        print 'delete folder', name
         name = name.replace('/', '.')
         mbox = self.root.get_folder(name)
-        print 'remove all emails'
         mbox.clear()
-        print 'remove directory', name
         self.root.remove_folder(name)
     def mov_folder(self, uid, src, dst):
         src = src.replace('/', '.')
@@ -286,6 +303,36 @@ class Maildir:
             os.unlink(path)
 
 
+##
+# Cleaning all hard links after moving the directory around (or before for that matter)
+def clean(username):
+    print '[i] cleaning mode'
+    db = Database(username)
+    mdir = Maildir(username)
+
+    # We fetch all folders which are not the folder #1
+    folders = db.get_folders()
+
+    # We loop through them to clear() all mails they contain
+    for uid in folders:
+        if uid == 1: # Well thats just fuck up my earlier comment
+            continue
+        print '[-] clearing mailbox %s (%d)' % (folders[uid], uid)
+        mdir.clr_folder(folders[uid])
+        db.clear_folder(uid)
+
+quiet = False
+if len(sys.argv) > 1:
+    if sys.argv[1] == 'clean':
+        clean(username)
+        exit()
+    if sys.argv[1] == 'quiet':
+        quiet = True
+    else:
+        print 'Syntax:', sys.argv[0], '[clean|quiet]'
+        exit()
+
+
 # Main program
 ##
 
@@ -301,9 +348,10 @@ imapFolders = gmail.get_folders()
 for k in dbFolders:
     # Deleting non existing folders
     if not k in imapFolders:
-        print '[-] deleting %s (%d)' % (dbFolders[k], k)
-        db.delete_folder(k)
+        if quiet is False:
+            print '[-] deleting %s (%d)' % (dbFolders[k], k)
         mdir.del_folder(dbFolders[k])
+        db.delete_folder(k)
 
 # We NEED to have [Gmail]/All Mail first since all original files will be there (uid= 1)
 keys = imapFolders.keys()
@@ -311,14 +359,16 @@ keys.sort()
 for k in keys:
     # If folder was renamed
     if k in dbFolders and dbFolders[k] != imapFolders[k]:
-        print '[c] moving %s -> %s (%d)' % (dbFolders[k], imapFolders[k], k)
-        db.update_folder(k, imapFolders[k])
+        if quiet is False:
+            print '[c] moving %s -> %s (%d)' % (dbFolders[k], imapFolders[k], k)
         mdir.mov_folder(k, dbFolders[k], imapFolders[k])
+        db.update_folder(k, imapFolders[k])
     # If folder doesnt exist
     elif not k in dbFolders:
-        print '[+] adding %s (%d)' % (imapFolders[k], k)
-        db.insert_folder(k, imapFolders[k])
+        if quiet is False:
+            print '[+] adding %s (%d)' % (imapFolders[k], k)
         mdir.add_folder(k, imapFolders[k])
+        db.insert_folder(k, imapFolders[k])
     else:
 #        print '[=] loading %s (%d)' % (imapFolders[k], k)
         mdir.load_folder(k, imapFolders[k])
@@ -328,8 +378,9 @@ for k in keys:
     ### Mails
     dbMails = db.get_mails(k)
     imapMails = gmail.get_mails(imapFolders[k], k)
-    print '[i] checking %s (%d) - emails: %d (local) %d (imap)' % (
-        imapFolders[k], k, len(dbMails), len(imapMails))
+    if quiet is False:
+        print '[i] checking %s (%d) - emails: %d (local) %d (imap)' % (
+            imapFolders[k], k, len(dbMails), len(imapMails))
 
     # Create new mails
     count = 0
@@ -339,8 +390,8 @@ for k in keys:
         if not uid in dbMails:
             if count != 0 and (count % 200) == 0:
                 db.commit()
-                status = '[+] added %d emails (%d KB downloaded)' % (count, totalSize)
-                print status
+                if quiet is False:
+                    print '[+] added %d emails (%d KB downloaded)' % (count, totalSize)
 
             msgid, id = imapMails[uid]
 
@@ -363,7 +414,8 @@ for k in keys:
     # Make sure to commit whats undone.. if emails were created
     if count > 0:
         db.commit()
-        print '[+] added %d emails (%d KB downloaded)' % (count, totalSize)
+        if quiet is False:
+            print '[+] added %d emails (%d KB downloaded)' % (count, totalSize)
 
 
     # Delete removed mails
@@ -372,13 +424,15 @@ for k in keys:
         if not uid in imapMails:
             if count != 0 and (count % 100) == 0:
                 db.commit()
-                print '[+] deleted %d emails' % count
+                if quiet is False:
+                    print '[+] deleted %d emails' % count
             db.delete_mail(uid, k)
             mdir.del_mail(uid, k)
             count += 1
 
     if count > 0:
         db.commit()
-        print '[+] deleted %d emails' % count
+        if quiet is False:
+            print '[+] deleted %d emails' % count
 
 gmail.logout()
