@@ -13,16 +13,15 @@ import os
 import sqlite3
 import sys
 
-##
-# Configuration
-
-# Short version:
-#username, password = 'your email', 'your password'
-
 # The base directory is the directory in which the script lies:
 root = os.path.dirname(sys.argv[0])
 
-if not 'username' in locals() or not 'password' in locals():
+# Short version:
+if __name__ == '__main__' and '--getpass' in sys.argv:
+    import getpass
+    username = input('Username? ')
+    password = getpass.getpass(prompt='Password? ')
+else:
     accountFile = os.path.join(root, '.account')
     if os.path.exists(accountFile):
         fd = open(accountFile)
