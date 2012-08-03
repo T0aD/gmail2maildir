@@ -104,6 +104,19 @@ class Gmail:
                         folders[uid] = name
         return folders
 
+    # Makes damn sure All Mails is the first in the list!:
+    # Oh and it just returns the keys and the first one is [Gmail]/All Mail:
+    def sort_keys(self, folders):
+        keys = folders.keys()
+        keys.sort()
+
+        for k in keys:
+            if folders[k] == '[Gmail]/All Mail':
+                keys.remove(k)
+                keys.insert(0, k)
+                break
+        return keys
+
     def get_mails(self, folder, fuid):
         reg = re.compile('^(\d+) \(X-GM-MSGID (\d+) UID (\d+)\)$')
 
@@ -343,6 +356,9 @@ mdir = Maildir(username)
 
 gmail = Gmail(username=username, password=password)
 imapFolders = gmail.get_folders()
+# We NEED to have [Gmail]/All Mail first since all original files will be there (uid= 1)
+keys = gmail.sort_keys(imapFolders)
+ALL_MAIL_UID = keys[0] # We store the UIDVALIDITY of mailbox All Mail
 
 ### Folders
 for k in dbFolders:
@@ -353,9 +369,6 @@ for k in dbFolders:
         mdir.del_folder(dbFolders[k])
         db.delete_folder(k)
 
-# We NEED to have [Gmail]/All Mail first since all original files will be there (uid= 1)
-keys = imapFolders.keys()
-keys.sort()
 for k in keys:
     # If folder was renamed
     if k in dbFolders and dbFolders[k] != imapFolders[k]:
@@ -396,7 +409,7 @@ for k in keys:
             msgid, id = imapMails[uid]
 
             # Check if the email was already downloaded somewhere:
-            if k != 1: # Different from All Mails:
+            if k != ALL_MAIL_UID: # Different from All Mails:
                 src_fuid, src_uid = db.get_original(msgid)
                 if not src_fuid is None:
                     mdir.link_mail(k, uid, src_fuid, src_uid)
